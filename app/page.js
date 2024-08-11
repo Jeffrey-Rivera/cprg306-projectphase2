@@ -1,113 +1,180 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useEffect } from 'react';
+import MovieList from './components/movie-list';
+// import MovieListHeading from './components/movieListHeading';
+import SearchBox from './components/search-box';
+// import AddFavorites from './components/addFavorites';
+// import RemoveFavorites from './components/removeFavorites';
+
+const API_KEY = 'd74b16e8'; 
+
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+function Alert({ message, isVisible, onClose }) {
+  if (!isVisible) return null;
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">app/page.js</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
+    <div className="fixed top-0 left-0 right-0 bg-green-500 text-white text-center py-4">
+      {message}
+      <button onClick={onClose} className="absolute top-1 right-2 text-xl">&times;</button>
+    </div>
+  );
+}
+
+export default function Page() {
+  const [movies, setMovies] = useState([]);
+  const [searchValue, setSearchValue] = useState('');
+  const [favorites, setFavorites] = useState([]);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const debouncedSearchValue = useDebounce(searchValue, 500);
+  const [isAlertVisible, setIsAlertVisible] = useState(false);
+  const [alertMessage, setAlertMessage] = useState('');
+
+
+  useEffect(() => {
+    const getMovieRequest = async () => {
+      if (!debouncedSearchValue) {
+        setMovies([]);
+        setErrorMessage('');
+        return;
+      }
+      const url = `https://www.omdbapi.com/?s=${encodeURIComponent(debouncedSearchValue)}&apikey=${API_KEY}`;
+      setIsLoading(true); 
+
+      try {
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error('Failed to fetch data');
+        }
+        const responseJson = await response.json();
+
+        setIsLoading(false); 
+        if (responseJson.Search) {
+          const moviesWithDetails = await Promise.all(
+            responseJson.Search.map(async (movie) => {
+              const detailsUrl = `https://www.omdbapi.com/?i=${movie.imdbID}&apikey=${API_KEY}`;
+              const detailsResponse = await fetch(detailsUrl);
+              const detailsJson = await detailsResponse.json();
+              return { ...movie, Genre: detailsJson.Genre, Ratings: detailsJson.Ratings };
+            })
+          );
+          setMovies(moviesWithDetails);
+          setErrorMessage('');
+        } else {
+          setMovies([]);
+          setErrorMessage('Movie not found!');
+        }
+      } catch (error) {
+        console.error('Error fetching movies:', error);
+        setIsLoading(false); 
+        setErrorMessage('Failed to fetch movies. Please try again later.');
+        setMovies([]);
+      }
+    };
+
+    getMovieRequest();
+  }, [debouncedSearchValue]);
+
+  
+
+  useEffect(() => {
+    const movieFavorites = localStorage.getItem('react-movie-app-favorites');
+    setFavorites(movieFavorites ? JSON.parse(movieFavorites) : []);
+  }, []);
+
+  const saveToLocalStorage = (items) => {
+    localStorage.setItem('react-movie-app-favorites', JSON.stringify(items));
+  };
+
+  const handleClearSearch = () => {
+    setSearchValue('');
+    setErrorMessage('');
+  };
+
+  const addFavoriteMovie = (movie) => {
+    const newFavoriteList = [...favorites, movie];
+    setFavorites(newFavoriteList);
+    saveToLocalStorage(newFavoriteList);
+    setAlertMessage(`${movie.Title} added to favorites!`);
+    setIsAlertVisible(true);
+    setTimeout(() => setIsAlertVisible(false), 3000); 
+  };
+
+  const removeFavoriteMovie = (movie) => {
+    const newFavoriteList = favorites.filter((favorite) => favorite.imdbID !== movie.imdbID);
+    setFavorites(newFavoriteList);
+    saveToLocalStorage(newFavoriteList);
+    setAlertMessage(`${movie.Title} removed from favorites.`);
+    setIsAlertVisible(true);
+    setTimeout(() => setIsAlertVisible(false), 3000); // Hide alert after 3 seconds
+  };
+
+  const clearFavorites = () => {
+    const confirmClear = window.confirm("Are you sure you want to clear all favorites?");
+    if (confirmClear) {
+      setFavorites([]);
+      localStorage.setItem('react-movie-app-favorites', JSON.stringify([]));
+    }
+  };
+
+  return (
+    <main className="bg-gray-900 p-2">
+      
+      <div className="mb-9">
+        <MovieListHeading heading="Movie Gallery" />
+        <p className="text-center text-white">Welcome to Movie Gallery!</p>
+        <p className="text-center text-white">Search and Save...</p>
+        <div className="flex flex-col items-center justify-center mt-6">
+            <SearchBox value={searchValue} onChange={setSearchValue} onClear={handleClearSearch} />
+            {isLoading && <p className="text-white">Loading...</p>}
+            {errorMessage && <p className="text-red-500">{errorMessage}</p>}
         </div>
       </div>
-
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-full sm:before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full sm:after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
+      <div>
+        <MovieList
+          movies={movies}
+          handleFavoritesClick={addFavoriteMovie}
+          FavoriteComponent={AddFavorites}
         />
       </div>
-
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800 hover:dark:bg-opacity-30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50 text-balance`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
+      
+      <div>
+        <MovieListHeading heading="Favorites" />
       </div>
+      <div>
+        <MovieList
+          movies={favorites}
+          handleFavoritesClick={removeFavoriteMovie}
+          FavoriteComponent={RemoveFavorites}
+        />
+      </div>
+      <div>
+      <button 
+          onClick={clearFavorites} 
+          className="bg-blue-400 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-300 ease-in-out my-4"
+        >
+          Clear List
+        </button>
+      </div>
+      <Alert 
+        message={alertMessage} 
+        isVisible={isAlertVisible} 
+        onClose={() => setIsAlertVisible(false)} 
+      />
     </main>
   );
 }
