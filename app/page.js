@@ -5,7 +5,7 @@ import MovieList from './components/movie-list';
 // import MovieListHeading from './components/movieListHeading';
 import SearchBox from './components/search-box';
 // import AddFavorites from './components/addFavorites';
-// import RemoveFavorites from './components/removeFavorites';
+import RemoveFavorites from './components/removeFavorites';
 
 const API_KEY = 'd74b16e8'; 
 
