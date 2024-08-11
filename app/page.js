@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import AddFavorites from './components/addFavorites';
 import MovieList from './components/movie-list';
-// import MovieListHeading from './components/movieListHeading';
-import SearchBox from './components/search-box';
-// import AddFavorites from './components/addFavorites';
+import MovieListHeading from './components/movieListHeading';
 import RemoveFavorites from './components/removeFavorites';
+import SearchBox from './components/search-box';
 
 const API_KEY = 'd74b16e8'; 
 
@@ -88,9 +88,7 @@ export default function Page() {
 
     getMovieRequest();
   }, [debouncedSearchValue]);
-
   
-
   useEffect(() => {
     const movieFavorites = localStorage.getItem('react-movie-app-favorites');
     setFavorites(movieFavorites ? JSON.parse(movieFavorites) : []);
@@ -120,7 +118,7 @@ export default function Page() {
     saveToLocalStorage(newFavoriteList);
     setAlertMessage(`${movie.Title} removed from favorites.`);
     setIsAlertVisible(true);
-    setTimeout(() => setIsAlertVisible(false), 3000); // Hide alert after 3 seconds
+    setTimeout(() => setIsAlertVisible(false), 3000); 
   };
 
   const clearFavorites = () => {
@@ -141,35 +139,35 @@ export default function Page() {
         <div className="flex flex-col items-center justify-center mt-6">
             <SearchBox value={searchValue} onChange={setSearchValue} onClear={handleClearSearch} />
             {isLoading && <p className="text-white">Loading...</p>}
-            {errorMessage && <p className="text-red-500">{errorMessage}</p>}
+            {errorMessage && <p className="text-red-600">{errorMessage}</p>}
         </div>
       </div>
       <div>
         <MovieList
           movies={movies}
           handleFavoritesClick={addFavoriteMovie}
-          FavoriteComponent={AddFavorites}
-        />
+          FavoriteComponent={AddFavorites}/>
       </div>
       
       <div>
         <MovieListHeading heading="Favorites" />
       </div>
+
       <div>
         <MovieList
           movies={favorites}
           handleFavoritesClick={removeFavoriteMovie}
-          FavoriteComponent={RemoveFavorites}
-        />
+          FavoriteComponent={RemoveFavorites}/>
       </div>
+
       <div>
       <button 
           onClick={clearFavorites} 
-          className="bg-blue-400 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-300 ease-in-out my-4"
-        >
+          className="bg-blue-400 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-300 ease-in-out my-4">
           Clear List
         </button>
       </div>
+      
       <Alert 
         message={alertMessage} 
         isVisible={isAlertVisible} 
