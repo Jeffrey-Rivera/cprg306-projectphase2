@@ -26,7 +26,7 @@ function Alert({ message, isVisible, onClose }) {
   if (!isVisible) return null;
 
   return (
-    <div className="fixed top-0 left-0 right-0 bg-green-500 text-white text-center py-4">
+    <div className="fixed top-0 left-0 right-0 bg-gray-500 text-white text-center py-3">
       {message}
       <button onClick={onClose} className="absolute top-1 right-2 text-xl">&times;</button>
     </div>
@@ -76,12 +76,12 @@ export default function Page() {
           setErrorMessage('');
         } else {
           setMovies([]);
-          setErrorMessage('Movie not found!');
+          setErrorMessage('Movie not in Gallery!');
         }
       } catch (error) {
         console.error('Error fetching movies:', error);
         setIsLoading(false); 
-        setErrorMessage('Failed to fetch movies. Please try again later.');
+        setErrorMessage('Failed to fetch movies. Please try again.');
         setMovies([]);
       }
     };
@@ -122,7 +122,7 @@ export default function Page() {
   };
 
   const clearFavorites = () => {
-    const confirmClear = window.confirm("Are you sure you want to clear all favorites?");
+    const confirmClear = window.confirm("Remove all saved Favorites?");
     if (confirmClear) {
       setFavorites([]);
       localStorage.setItem('react-movie-app-favorites', JSON.stringify([]));
@@ -130,18 +130,17 @@ export default function Page() {
   };
 
   return (
-    <main className="bg-gray-900 p-2">
-      
-      <div className="mb-9">
-        <MovieListHeading heading="Movie Gallery" />
-        <p className="text-center text-white">Welcome to Movie Gallery!</p>
-        <p className="text-center text-white">Search and Save...</p>
+    <main className="bg-slate-700 min-h-screen p-20">
+      <div className="mb-12">
+        <MovieListHeading heading="Movie Gallery"/>
+        <p className="text-center text-2xl text-white">Welcome to Movie Gallery!</p>
         <div className="flex flex-col items-center justify-center mt-6">
             <SearchBox value={searchValue} onChange={setSearchValue} onClear={handleClearSearch} />
             {isLoading && <p className="text-white">Loading...</p>}
             {errorMessage && <p className="text-red-600">{errorMessage}</p>}
         </div>
       </div>
+      
       <div>
         <MovieList
           movies={movies}
@@ -160,12 +159,12 @@ export default function Page() {
           FavoriteComponent={RemoveFavorites}/>
       </div>
 
-      <div>
+      <div class="flex justify-center">
       <button 
-          onClick={clearFavorites} 
-          className="bg-blue-400 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-300 ease-in-out my-4">
-          Clear List
-        </button>
+        onClick={clearFavorites} 
+        class="bg-blue-400 text-white px-16 py-2 rounded-md hover:bg-blue-700 transition duration-300 ease-in-out">
+        Clear List
+      </button>
       </div>
       
       <Alert 

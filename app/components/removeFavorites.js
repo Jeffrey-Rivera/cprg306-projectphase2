@@ -2,9 +2,9 @@ export default function RemoveFavorites({ onClick }) {
     return (
       <button
         onClick={onClick}
-        className="text-white bg-gray-700 hover:bg-gray-600 font-bold py-2 px-4 rounded"
+        className="text-red-800 bg-gray-500 hover:bg-gray-200 font-bold py-2 px-4 rounded"
       >
-        "REMOVE MOVIE"
+        REMOVE MOVIE
       </button>
     );
   }

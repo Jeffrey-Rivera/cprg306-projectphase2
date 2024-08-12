@@ -11,6 +11,7 @@ export default function MovieList({movies, handleFavoritesClick, FavoriteCompone
                 <p className="text-sm">⭐{movie.Ratings.find(r => r.Source === "Internet Movie Database")?.Value}</p>}
               </div>
             </div>
+            
             <div className="text-sm pt-2 text-gray-400">
               <p>Type: {movie.Type}</p>
               <p>Genre: {movie.Genre}</p>
