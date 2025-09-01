@@ -12,7 +12,7 @@ export default function SearchBox({ value, onChange, onClear }) {
           className="border border-gray-300 rounded-md px-3 py-2 mr-2 focus:outline-none focus:border-blue-800 "
           value={value}
           onChange={handleChange}
-          placeholder="Search a movie here..."
+          placeholder="Search a movie here...."
         />
 
         <button
