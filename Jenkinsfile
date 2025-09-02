@@ -1,9 +1,10 @@
 pipeline {
   agent any
+
   tools { nodejs 'Node24' }
 
   options {
-    timestamps()        // ✅ safe without extra plugin
+    timestamps()
   }
 
   stages {
@@ -14,6 +15,7 @@ pipeline {
         echo '✅ Checkout complete'
       }
     }
+
     stage('Install') {
       steps {
         echo '📦 Installing deps...'
@@ -21,14 +23,16 @@ pipeline {
         echo '✅ Deps installed'
       }
     }
+
     stage('Maintenance (optional)') {
-      when { expression { return env.BRANCH_NAME == "main" } }
+      when { expression { return env.BRANCH_NAME == 'main' } }
       steps {
         echo '🛠 Updating browserslist DB...'
         sh 'npx update-browserslist-db@latest || true'
         echo '✅ Browserslist updated'
       }
     }
+
     stage('Build') {
       steps {
         echo '🏗 Building Next.js...'
@@ -36,6 +40,7 @@ pipeline {
         echo '✅ Build ok'
       }
     }
+
     stage('Test') {
       steps {
         echo '🧪 Running tests (if any)...'
@@ -46,14 +51,28 @@ pipeline {
   }
 
   post {
-    success {
-      echo '📂 Archiving .next...'
-      archiveArtifacts artifacts: '.next/**', fingerprint: true
-      echo '✅ Artifacts archived'
-    }
+    // Keep JUnit, but don't fail if there are no reports
     always {
-      echo '🧹 Cleaning workspace & collecting test reports...'
+      echo '📝 Publishing test reports (if any)...'
       junit testResults: 'junit*.xml', allowEmptyResults: true
+    }
+
+    // Archive BEFORE cleanup, and only if .next exists
+    success {
+      script {
+        if (fileExists('.next')) {
+          echo '📂 Archiving .next artifacts...'
+          archiveArtifacts artifacts: '.next/**', fingerprint: true
+          echo '✅ Artifacts archived'
+        } else {
+          echo 'ℹ️ No .next directory found; skipping archive'
+        }
+      }
+    }
+
+    // Runs LAST in Declarative pipelines
+    cleanup {
+      echo '🧹 Cleaning workspace...'
       cleanWs()
       echo '✅ Cleanup done'
     }
