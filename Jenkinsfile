@@ -1,13 +1,9 @@
 pipeline {
   agent any
-
-  tools {
-    nodejs 'Node24'  // matches your Tools config
-  }
+  tools { nodejs 'Node24' }
 
   options {
-    timestamps()
-    ansiColor('xterm')
+    timestamps()        // ✅ safe without extra plugin
   }
 
   stages {
@@ -18,49 +14,45 @@ pipeline {
         echo '✅ Checkout complete'
       }
     }
-
     stage('Install') {
       steps {
-        echo '📦 Installing project dependencies with npm ci...'
+        echo '📦 Installing deps...'
         sh 'npm ci'
-        echo '✅ Dependencies installed successfully'
+        echo '✅ Deps installed'
       }
     }
-
     stage('Maintenance (optional)') {
-      when { expression { return env.BRANCH_NAME == 'main' } }
+      when { expression { return env.BRANCH_NAME == "main" } }
       steps {
-        echo '🛠 Updating browserslist database (only on main branch)...'
+        echo '🛠 Updating browserslist DB...'
         sh 'npx update-browserslist-db@latest || true'
-        echo '✅ Browserslist update finished'
+        echo '✅ Browserslist updated'
       }
     }
-
     stage('Build') {
       steps {
-        echo '🏗 Running Next.js production build...'
+        echo '🏗 Building Next.js...'
         sh 'npm run build'
-        echo '✅ Build completed successfully'
+        echo '✅ Build ok'
       }
     }
-
     stage('Test') {
       steps {
-        echo '🧪 Running tests (if present)...'
+        echo '🧪 Running tests (if any)...'
         sh 'npm test --if-present'
-        echo '✅ Tests finished (or skipped if none found)'
+        echo '✅ Tests done'
       }
     }
   }
 
   post {
     success {
-      echo '📂 Archiving build artifacts from .next directory...'
+      echo '📂 Archiving .next...'
       archiveArtifacts artifacts: '.next/**', fingerprint: true
-      echo '✅ Artifacts archived successfully'
+      echo '✅ Artifacts archived'
     }
     always {
-      echo '🧹 Cleaning up workspace and collecting test reports...'
+      echo '🧹 Cleaning workspace & collecting test reports...'
       junit testResults: 'junit*.xml', allowEmptyResults: true
       cleanWs()
       echo '✅ Cleanup done'
