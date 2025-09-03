@@ -53,9 +53,9 @@ pipeline {
     stage('Docker: Build & Push') {
       steps {
         script {
-          // tag uses <branch>-<shortSHA>; main also gets :latest
-          def short = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-          def tag   = "${env.BRANCH_NAME}-${short}"
+          // compute tag in Groovy
+          def shortSha = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+          def tag = "${env.BRANCH_NAME}-${shortSha}"
 
           docker.withRegistry('https://registry.hub.docker.com', DOCKERHUB_CREDS) {
             def img = docker.build("${DOCKERHUB_REPO}:${tag}")
