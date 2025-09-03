@@ -1,10 +1,11 @@
 pipeline {
   agent any
-
   tools { nodejs 'Node24' }
+  options { timestamps() }
 
-  options {
-    timestamps()
+  environment {
+    DOCKERHUB_REPO  = 'jeffreyrivera/my-pipeline-306-nextjs'
+    DOCKERHUB_CREDS = 'dockerhub-creds' // Jenkins username+password cred for Docker Hub
   }
 
   stages {
@@ -48,16 +49,31 @@ pipeline {
         echo '✅ Tests done'
       }
     }
+
+    stage('Docker: Build & Push') {
+      steps {
+        script {
+          // tag uses <branch>-<shortSHA>; main also gets :latest
+          def short = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+          def tag   = "${env.BRANCH_NAME}-${short}"
+
+          docker.withRegistry('https://registry.hub.docker.com', DOCKERHUB_CREDS) {
+            def img = docker.build("${DOCKERHUB_REPO}:${tag}")
+            img.push()
+            if (env.BRANCH_NAME == 'main') {
+              img.push('latest')
+            }
+          }
+        }
+      }
+    }
   }
 
   post {
-    // Keep JUnit, but don't fail if there are no reports
     always {
       echo '📝 Publishing test reports (if any)...'
       junit testResults: 'junit*.xml', allowEmptyResults: true
     }
-
-    // Archive BEFORE cleanup, and only if .next exists
     success {
       script {
         if (fileExists('.next')) {
@@ -69,8 +85,6 @@ pipeline {
         }
       }
     }
-
-    // Runs LAST in Declarative pipelines
     cleanup {
       echo '🧹 Cleaning workspace...'
       cleanWs()
