@@ -5,7 +5,7 @@ pipeline {
 
   environment {
     DOCKERHUB_REPO  = 'jeffreyrivera/my-pipeline-306-nextjs'
-    DOCKERHUB_CREDS = 'dockerhub-creds' // Jenkins username+password cred for Docker Hub
+    DOCKERHUB_CREDS = 'docker-hub-repo'   // <-- matches your actual credential ID
   }
 
   stages {
@@ -53,21 +53,23 @@ pipeline {
     stage('Docker: Build & Push') {
       steps {
         script {
-          // compute tag in Groovy
+          // Fallback for non-multibranch jobs where BRANCH_NAME may be empty
+          def branch   = env.BRANCH_NAME ?: sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
           def shortSha = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-          def tag = "${env.BRANCH_NAME}-${shortSha}"
+          def tag      = "${branch}-${shortSha}"
 
-          docker.withRegistry('https://registry.hub.docker.com', DOCKERHUB_CREDS) {
+          // Login & push using Docker Pipeline plugin
+          docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDS) {
             def img = docker.build("${DOCKERHUB_REPO}:${tag}")
-            img.push()
-            if (env.BRANCH_NAME == 'main') {
-              img.push('latest')
+            img.push()                 // push branch-SHA tag
+            if (branch == 'main') {
+              img.push('latest')       // also push :latest for main
             }
           }
         }
       }
     }
-  }
+  } // <-- close stages BEFORE post
 
   post {
     always {
