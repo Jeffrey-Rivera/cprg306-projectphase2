@@ -50,18 +50,43 @@ pipeline {
       }
     }
 
+    stage('Version bump') {
+      steps {
+        script {
+          // ensure VERSION file exists (default to 1.0.0)
+          if (!fileExists('VERSION')) {
+            writeFile file: 'VERSION', text: '1.0.0'
+          }
+
+          // read current version
+          def version = readFile('VERSION').trim()
+
+          // split into parts
+          def (major, minor, patch) = version.tokenize('.').collect { it as int }
+
+          // bump patch automatically
+          patch = patch + 1
+          def newVersion = "${major}.${minor}.${patch}"
+
+          // save new version
+          writeFile file: 'VERSION', text: newVersion
+          echo "🔢 New version: ${newVersion}"
+
+          // expose it to next stages
+          env.IMAGE_TAG = newVersion
+        }
+      }
+    }
+
     stage('Docker: Build & Push') {
       steps {
         script {
-          // Fallback for non-multibranch jobs where BRANCH_NAME may be empty
-          def branch   = env.BRANCH_NAME ?: sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
-          def shortSha = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-          def tag      = "${branch}-${shortSha}"
+          def branch = env.BRANCH_NAME ?: sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
+          def tag    = env.IMAGE_TAG  // 👈 use the auto-incremented version
 
-          // Login & push using Docker Pipeline plugin
           docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDS) {
             def img = docker.build("${DOCKERHUB_REPO}:${tag}")
-            img.push()                 // push branch-SHA tag
+            img.push()                 // push version tag
             if (branch == 'main') {
               img.push('latest')       // also push :latest for main
             }
@@ -69,7 +94,7 @@ pipeline {
         }
       }
     }
-  } // <-- close stages BEFORE post
+  }
 
   post {
     always {
