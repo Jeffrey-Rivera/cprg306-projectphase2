@@ -3,9 +3,14 @@ pipeline {
   tools { nodejs 'Node24' }
   options { timestamps() }
 
+  parameters {
+    choice(name: 'BUMP', choices: ['patch', 'minor', 'major'], description: 'Which version to bump?')
+  }
+
   environment {
     DOCKERHUB_REPO  = 'jeffreyrivera/my-pipeline-306-nextjs'
-    DOCKERHUB_CREDS = 'docker-hub-repo'   // <-- matches your actual credential ID
+    DOCKERHUB_CREDS = 'docker-hub-repo'      // Docker Hub access token credential ID
+    GITHUB_CREDS    = 'github-credentials'   // GitHub username/password(or PAT) credential ID
   }
 
   stages {
@@ -13,6 +18,7 @@ pipeline {
       steps {
         echo '🔄 Checking out source code from GitHub...'
         checkout scm
+        sh 'git fetch --tags --quiet || true'   // ensure we see existing tags
         echo '✅ Checkout complete'
       }
     }
@@ -53,27 +59,43 @@ pipeline {
     stage('Version bump') {
       steps {
         script {
-          // ensure VERSION file exists (default to 1.0.0)
-          if (!fileExists('VERSION')) {
-            writeFile file: 'VERSION', text: '1.0.0'
+          // Determine current version from latest git tag vX.Y.Z; fallback to VERSION file; else 1.0.0
+          def lastTag = sh(script: "git tag --list 'v*.*.*' --sort=-v:refname | head -n 1", returnStdout: true).trim()
+          def current = lastTag ? lastTag.replaceFirst(/^v/, '') :
+                        (fileExists('VERSION') ? readFile('VERSION').trim() : '1.0.0')
+
+          def parts = current.tokenize('.').collect { it as int }
+          if (parts.size() != 3) { error "Bad version '${current}' (expected X.Y.Z)" }
+          def (major, minor, patch) = parts
+
+          switch (params.BUMP) {
+            case 'major': major++; minor = 0; patch = 0; break
+            case 'minor': minor++; patch = 0;            break
+            default     : patch++;                       break
           }
 
-          // read current version
-          def version = readFile('VERSION').trim()
+          env.IMAGE_TAG = "${major}.${minor}.${patch}"
+          echo "🔢 New version: ${env.IMAGE_TAG}"
 
-          // split into parts
-          def (major, minor, patch) = version.tokenize('.').collect { it as int }
+          // Persist: write VERSION, commit, and push tag vX.Y.Z
+          writeFile file: 'VERSION', text: env.IMAGE_TAG + "\n"
 
-          // bump patch automatically
-          patch = patch + 1
-          def newVersion = "${major}.${minor}.${patch}"
+          sh """
+            set -eux
+            git config user.name  "jenkins-bot"
+            git config user.email "jenkins-bot@local"
+            git add VERSION
+            git commit -m "chore: bump version to ${IMAGE_TAG} [skip ci]" || true
+          """
 
-          // save new version
-          writeFile file: 'VERSION', text: newVersion
-          echo "🔢 New version: ${newVersion}"
-
-          // expose it to next stages
-          env.IMAGE_TAG = newVersion
+          withCredentials([usernamePassword(credentialsId: GITHUB_CREDS, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
+            sh """
+              set -eux
+              git tag -a v${IMAGE_TAG} -m "Release v${IMAGE_TAG}" || true
+              git push https://${GIT_USER}:${GIT_TOKEN}@github.com/Jeffrey-Rivera/cprg306-projectphase2.git HEAD:main
+              git push https://${GIT_USER}:${GIT_TOKEN}@github.com/Jeffrey-Rivera/cprg306-projectphase2.git --tags
+            """
+          }
         }
       }
     }
@@ -81,14 +103,14 @@ pipeline {
     stage('Docker: Build & Push') {
       steps {
         script {
-          def branch = env.BRANCH_NAME ?: sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
-          def tag    = env.IMAGE_TAG  // 👈 use the auto-incremented version
+          // Resolve branch name (works in classic Pipeline and multibranch)
+          def branch = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
 
           docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDS) {
-            def img = docker.build("${DOCKERHUB_REPO}:${tag}")
-            img.push()                 // push version tag
+            def img = docker.build("${DOCKERHUB_REPO}:${env.IMAGE_TAG}")
+            img.push()                                // :X.Y.Z
             if (branch == 'main') {
-              img.push('latest')       // also push :latest for main
+              img.push('latest')                      // :latest only for main
             }
           }
         }
@@ -111,6 +133,7 @@ pipeline {
           echo 'ℹ️ No .next directory found; skipping archive'
         }
       }
+      echo "✅ Pushed ${DOCKERHUB_REPO}:${env.IMAGE_TAG}${env.BRANCH_NAME=='main'?' and :latest':''}"
     }
     cleanup {
       echo '🧹 Cleaning workspace...'
