@@ -9,8 +9,8 @@ pipeline {
 
   environment {
     DOCKERHUB_REPO  = 'jeffreyrivera/my-pipeline-306-nextjs'
-    DOCKERHUB_CREDS = 'docker-hub-repo'      // Docker Hub access token credential ID
-    GITHUB_CREDS    = 'github-credentials'   // GitHub username/password(or PAT) credential ID
+    DOCKERHUB_CREDS = 'docker-hub-repo'          // Docker Hub access token credential ID
+    GITHUB_CREDS    = 'github-credentials-PAT'   // <-- updated to your PAT credential ID
   }
 
   stages {
@@ -77,24 +77,38 @@ pipeline {
           env.IMAGE_TAG = "${major}.${minor}.${patch}"
           echo "🔢 New version: ${env.IMAGE_TAG}"
 
-          // Persist: write VERSION, commit, and push tag vX.Y.Z
+          // Persist: write VERSION, commit
           writeFile file: 'VERSION', text: env.IMAGE_TAG + "\n"
 
-          sh """
+          sh '''
             set -eux
             git config user.name  "jenkins-bot"
             git config user.email "jenkins-bot@local"
             git add VERSION
             git commit -m "chore: bump version to ${IMAGE_TAG} [skip ci]" || true
-          """
+          '''
 
-          withCredentials([usernamePassword(credentialsId: GITHUB_CREDS, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
-            sh """
+          // Tag & push using Authorization header (no token in URL)
+          withCredentials([usernamePassword(
+            credentialsId: GITHUB_CREDS,           // uses 'github-credentials-PAT'
+            usernameVariable: 'GIT_USER',
+            passwordVariable: 'GIT_TOKEN'
+          )]) {
+            sh '''
               set -eux
-              git tag -a v${IMAGE_TAG} -m "Release v${IMAGE_TAG}" || true
-              git push https://${GIT_USER}:${GIT_TOKEN}@github.com/Jeffrey-Rivera/cprg306-projectphase2.git HEAD:main
-              git push https://${GIT_USER}:${GIT_TOKEN}@github.com/Jeffrey-Rivera/cprg306-projectphase2.git --tags
-            """
+              # Ensure origin is a clean HTTPS URL (no creds embedded)
+              git remote set-url origin https://github.com/Jeffrey-Rivera/cprg306-projectphase2.git
+
+              # Create tag if not present (idempotent)
+              git tag -a v"$IMAGE_TAG" -m "Release v$IMAGE_TAG" || true
+
+              # Build Basic auth header for x-access-token:<PAT>
+              B64=$(printf "%s" "x-access-token:${GIT_TOKEN}" | base64 -w0 2>/dev/null || base64)
+
+              # Push commit & tags; token only in HTTP header (not stored)
+              git -c http.extraheader="AUTHORIZATION: Basic ${B64}" push origin HEAD:main
+              git -c http.extraheader="AUTHORIZATION: Basic ${B64}" push origin --tags
+            '''
           }
         }
       }
