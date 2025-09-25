@@ -117,11 +117,10 @@ pipeline {
     stage('Docker: Build & Push') {
       steps {
         script {
-          // Resolve branch name (works in classic Pipeline and multibranch)
           def branch = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
-
           docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDS) {
-            def img = docker.build("${DOCKERHUB_REPO}:${env.IMAGE_TAG}")
+            // Force a clean rebuild once to ensure next build is baked in
+            def img = docker.build("${DOCKERHUB_REPO}:${env.IMAGE_TAG}", "--pull --no-cache .")
             img.push()                                // :X.Y.Z
             if (branch == 'main') {
               img.push('latest')                      // :latest only for main
@@ -130,7 +129,6 @@ pipeline {
         }
       }
     }
-  }
 
   post {
     always {
