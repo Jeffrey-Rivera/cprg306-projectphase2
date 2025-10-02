@@ -21,7 +21,7 @@ pipeline {
     // ----- App/Container -----
     CONTAINER_NAME     = 'nextjs-app'
     APP_PORT           = '3000'                      // inside container
-    EXPOSE_PORT        = '80'                        // host port
+    EXPOSE_PORT        = '80'                        // host port (open this in SG if you keep 80)
 
     // computed later:
     // IMAGE_TAG
@@ -71,11 +71,13 @@ pipeline {
     }
 
     stage('Deploy to EC2') {
-      when { branch 'main' } // deploy only from main; remove/adjust if needed
+      when { branch 'main' } // deploy only from main
       steps {
         sshagent([env.SSH_KEY_CRED]) {
+
+          // Prepare known_hosts locally (POSIX sh)
           sh """
-            set -eo pipefail
+            set -e
             mkdir -p ~/.ssh && chmod 700 ~/.ssh
             ssh-keyscan -H ${EC2_HOST} >> ~/.ssh/known_hosts
           """
@@ -85,23 +87,22 @@ pipeline {
             if (env.DOCKERHUB_PRIVATE?.toLowerCase() == 'true') {
               withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
                 sh """
-                  ssh -o BatchMode=yes ${EC2_USER}@${EC2_HOST} 'echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin'
+                  ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} 'echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin'
                 """
               }
             }
           }
 
-          // Pull new image and (re)start container
+          // Pull new image and (re)start container (remote uses bash by default on Amazon Linux)
           sh """
-            ssh -o BatchMode=yes ${EC2_USER}@${EC2_HOST} '
-              set -eo pipefail
+            ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
+              set -e
 
               echo "Pulling ${DOCKERHUB_REPO}:${IMAGE_TAG} ..."
               docker pull ${DOCKERHUB_REPO}:${IMAGE_TAG}
 
               echo "Stopping old container (if any)..."
-              docker stop ${CONTAINER_NAME} || true
-              docker rm   ${CONTAINER_NAME} || true
+              docker rm -f ${CONTAINER_NAME} || true
 
               echo "Starting new container..."
               docker run -d --name ${CONTAINER_NAME} \\
@@ -109,7 +110,7 @@ pipeline {
                 --restart unless-stopped \\
                 ${DOCKERHUB_REPO}:${IMAGE_TAG}
 
-              docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\\t{{.Status}}\\t{{.Image}}"
+              docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\\t{{.Status}}\\t{{.Image}}\\t{{.Ports}}"
             '
           """
         }
@@ -119,15 +120,18 @@ pipeline {
     stage('Health Check') {
       when { branch 'main' }
       steps {
-        // simple HTTP check against EC2 public endpoint
+        // POSIX-friendly loop (no Bash brace expansion)
         sh """
+          set -e
           echo "Waiting for app to be ready on http://${EC2_HOST}:${EXPOSE_PORT} ..."
-          for i in {1..20}; do
+          i=1
+          while [ "\$i" -le 20 ]; do
             if curl -fsS http://${EC2_HOST}:${EXPOSE_PORT} >/dev/null; then
               echo "✅ App is responding"
               exit 0
             fi
             sleep 3
+            i=\$((i+1))
           done
           echo "❌ Health check failed"
           exit 1
