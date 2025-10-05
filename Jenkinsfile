@@ -16,7 +16,7 @@ pipeline {
     // ----- EC2 / SSH -----
     EC2_HOST      = '15.223.186.70'
     EC2_USER      = 'ec2-user'
-    SSH_KEY_CRED  = 'ec2-server-key'         // Jenkins "SSH Username with private key"
+    SSH_KEY_CRED  = 'ec2-server-key'          // Jenkins "SSH Username with private key"
 
     // App / ports (for health check etc.)
     EXPOSE_PORT   = '80'
@@ -67,7 +67,7 @@ pipeline {
       }
     }
 
-    // ---- NEW: Compose-based deployment to EC2 ----
+    // ---- Compose-based deployment to EC2 (auto-detect compose command) ----
     stage('Deploy to EC2') {
       when { branch 'main' }
       steps {
@@ -99,24 +99,39 @@ pipeline {
             }
           }
 
-          // write .env, pull and compose up
+          // write .env, ensure docker is running, pick compose cmd, then pull & up
           sh """
             ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
               set -e
               cd ~/app
 
-              # Write .env for docker-compose
+              # Ensure Docker is running (harmless if already started)
+              if ! sudo systemctl is-active --quiet docker; then
+                sudo systemctl enable --now docker || true
+                sudo usermod -aG docker ${EC2_USER} || true
+              fi
+
+              # Pick compose command: prefer "docker compose", fallback to "docker-compose"
+              if docker compose version >/dev/null 2>&1; then
+                COMPOSE="docker compose"
+              elif command -v docker-compose >/dev/null 2>&1; then
+                COMPOSE="$(command -v docker-compose)"
+              else
+                echo "❌ Docker Compose not found"; exit 1
+              fi
+
+              # Write .env that docker-compose reads
               cat > .env <<EOF
 DOCKERHUB_REPO=${DOCKERHUB_REPO}
 IMAGE_TAG=${IMAGE_TAG}
 EOF
 
-              # Pull and start
-              docker compose pull
-              docker compose up -d
+              # Pull and start the stack
+              \$COMPOSE pull
+              \$COMPOSE up -d
 
-              # optional: clean up old images (keeps current)
-              docker image prune -f
+              # optional: clean up old images (keeps running ones)
+              docker image prune -f || true
             '
           """
         }
