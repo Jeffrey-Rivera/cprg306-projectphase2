@@ -108,7 +108,6 @@ cd ~/app
 # Ensure Docker is running (harmless if already started)
 if ! sudo systemctl is-active --quiet docker; then
   sudo systemctl enable --now docker || true
-  # use literal username to avoid Groovy ${} parsing issues
   sudo usermod -aG docker ec2-user || true
 fi
 
@@ -118,10 +117,10 @@ if docker compose version >/dev/null 2>&1; then
 elif command -v docker-compose >/dev/null 2>&1; then
   COMPOSE="$(command -v docker-compose)"
 else
-  echo "❌ Docker Compose not found"; exit 1
+  echo "Docker Compose not found"; exit 1
 fi
 
-# Write .env that docker-compose reads (values injected by Jenkins before SSH)
+# Write .env that docker-compose reads (values below are inserted by Jenkins before SSH)
 cat > .env <<EOVARS
 DOCKERHUB_REPO=${DOCKERHUB_REPO}
 IMAGE_TAG=${IMAGE_TAG}
