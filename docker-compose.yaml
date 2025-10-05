@@ -3,11 +3,12 @@ services:
     image: ${DOCKERHUB_REPO}:${IMAGE_TAG}
     container_name: nextjs_app
     restart: always
-    # remove this:
-    # ports:
-    #   - "3000:3000"
     environment:
       - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    expose:
+      - "3000"   # internal-only, optional but nice for clarity
 
   nginx:
     image: nginx:latest
