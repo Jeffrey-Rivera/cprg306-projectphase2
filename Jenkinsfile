@@ -10,19 +10,17 @@ pipeline {
   environment {
     // ----- Docker Hub -----
     DOCKERHUB_REPO    = 'jeffreyrivera/my-pipeline-306-nextjs'
-    DOCKERHUB_CREDS   = 'docker-hub-repo'     // Jenkins "Username with password"
-    DOCKERHUB_PRIVATE = 'false'               // set 'true' if the repo is private
+    DOCKERHUB_CREDS   = 'docker-hub-repo'
+    DOCKERHUB_PRIVATE = 'false'   // set 'true' if private
 
     // ----- EC2 / SSH -----
     EC2_HOST      = '15.223.186.70'
     EC2_USER      = 'ec2-user'
-    SSH_KEY_CRED  = 'ec2-server-key'          // Jenkins "SSH Username with private key"
+    SSH_KEY_CRED  = 'ec2-server-key'
 
-    // App / ports (for health check etc.)
+    // Health check
     EXPOSE_PORT   = '80'
-
-    // computed later:
-    // IMAGE_TAG
+    // IMAGE_TAG is computed later
   }
 
   stages {
@@ -59,7 +57,7 @@ pipeline {
         script {
           docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDS) {
             def img = docker.build("${DOCKERHUB_REPO}:${env.IMAGE_TAG}", "--pull --no-cache .")
-            img.push() // :X.Y.Z
+            img.push() // tag :X.Y.Z
             def branch = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
             if (branch == 'main') { img.push('latest') }
           }
@@ -67,51 +65,52 @@ pipeline {
       }
     }
 
-    // ---- Compose-based deployment to EC2 (auto-detect compose command) ----
     stage('Deploy to EC2') {
       when { branch 'main' }
       steps {
         sshagent([env.SSH_KEY_CRED]) {
 
           // trust host
-          sh """
+          sh '''
             mkdir -p ~/.ssh && chmod 700 ~/.ssh
-            ssh-keyscan -H ${EC2_HOST} >> ~/.ssh/known_hosts
-          """
+            ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+          '''
 
           // create remote app dir
-          sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} 'mkdir -p ~/app'"
+          sh '''
+            ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "mkdir -p ~/app"
+          '''
 
           // copy compose + nginx config
-          sh """
-            scp -o StrictHostKeyChecking=no docker-compose.yaml ${EC2_USER}@${EC2_HOST}:~/app/
-            scp -o StrictHostKeyChecking=no nginx.conf ${EC2_USER}@${EC2_HOST}:~/app/
-          """
+          sh '''
+            scp -o StrictHostKeyChecking=no docker-compose.yaml "$EC2_USER@$EC2_HOST:~/app/"
+            scp -o StrictHostKeyChecking=no nginx.conf        "$EC2_USER@$EC2_HOST:~/app/"
+          '''
 
-          // optional: login if Docker Hub repo is private
+          // login on EC2 if repo is private
           script {
             if (env.DOCKERHUB_PRIVATE?.toLowerCase() == 'true') {
               withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
-                sh """
-                  ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} 'echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin'
-                """
+                sh '''
+                  ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "echo \\"$DH_PASS\\" | docker login -u \\"$DH_USER\\" --password-stdin"
+                '''
               }
             }
           }
 
-          // write .env, ensure docker is running, pick compose cmd, then pull & up
-          sh """
-            ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} 'bash -s' <<'EOF'
+          // write .env (with local expansion), ensure docker, pick compose, pull & up
+          sh '''
+            ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" 'bash -s' <<EOF
 set -e
 cd ~/app
 
-# Ensure Docker is running (harmless if already started)
+# Ensure Docker is running
 if ! sudo systemctl is-active --quiet docker; then
   sudo systemctl enable --now docker || true
   sudo usermod -aG docker ec2-user || true
 fi
 
-# Pick compose command: prefer "docker compose", fallback to "docker-compose"
+# Pick compose command
 if docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -120,20 +119,20 @@ else
   echo "Docker Compose not found"; exit 1
 fi
 
-# Write .env that docker-compose reads (values below are inserted by Jenkins before SSH)
+# Write .env (expanded locally before sending)
 cat > .env <<EOVARS
 DOCKERHUB_REPO=${DOCKERHUB_REPO}
 IMAGE_TAG=${IMAGE_TAG}
 EOVARS
 
-# Pull and start the stack
-\$COMPOSE pull
-\$COMPOSE up -d
+# Pull & start (expand on remote, so escape the $ here)
+\\$COMPOSE pull
+\\$COMPOSE up -d
 
-# optional: clean up old images (keeps running ones)
+# optional cleanup
 docker image prune -f || true
 EOF
-          """
+          '''
         }
       }
     }
@@ -141,21 +140,21 @@ EOF
     stage('Health Check') {
       when { branch 'main' }
       steps {
-        sh """
+        sh '''
           set -e
-          echo "Waiting for app on http://${EC2_HOST}:${EXPOSE_PORT} ..."
+          echo "Waiting for app on http://$EC2_HOST:$EXPOSE_PORT ..."
           i=1
-          while [ "\\$i" -le 20 ]; do
-            if curl -fsS http://${EC2_HOST}:${EXPOSE_PORT} >/dev/null; then
+          while [ "$i" -le 20 ]; do
+            if curl -fsS "http://$EC2_HOST:$EXPOSE_PORT" >/dev/null; then
               echo "✅ App is responding"
               exit 0
             fi
             sleep 3
-            i=\\$((i+1))
+            i=$((i+1))
           done
           echo "❌ Health check failed"
           exit 1
-        """
+        '''
       }
     }
   }
