@@ -10,16 +10,16 @@ pipeline {
   environment {
     // ----- Docker Hub -----
     DOCKERHUB_REPO    = 'jeffreyrivera/my-pipeline-306-nextjs'
-    DOCKERHUB_CREDS   = 'docker-hub-repo'     // Jenkins "Username with password"
-    DOCKERHUB_PRIVATE = 'false'               // set 'true' if the repo is private
+    DOCKERHUB_CREDS   = 'docker-hub-repo'   // Jenkins credential: Username with password
+    DOCKERHUB_PRIVATE = 'false'             // set 'true' if your repo is private
 
     // ----- EC2 / SSH -----
-    EC2_HOST      = '15.223.186.70'
-    EC2_USER      = 'ec2-user'
-    SSH_KEY_CRED  = 'ec2-server-key'          // Jenkins "SSH Username with private key"
+    EC2_HOST     = '15.223.186.70'
+    EC2_USER     = 'ec2-user'
+    SSH_KEY_CRED = 'ec2-server-key'         // Jenkins credential: SSH Username with private key
 
-    // Health check port (nginx)
-    EXPOSE_PORT   = '80'
+    // ----- Health check -----
+    EXPOSE_PORT  = '80'
 
     // computed later: IMAGE_TAG
   }
@@ -36,6 +36,7 @@ pipeline {
     stage('Set Version') {
       steps {
         script {
+          // Find last vX.Y.Z tag; default to 1.0.0 if none
           def lastTag = sh(script: "git tag --list 'v*.*.*' --sort=-v:refname | head -n 1", returnStdout: true).trim()
           def current = lastTag ? lastTag.replaceFirst(/^v/, '') : '1.0.0'
           def parts = current.tokenize('.').collect { it as int }
@@ -58,7 +59,8 @@ pipeline {
         script {
           docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDS) {
             def img = docker.build("${DOCKERHUB_REPO}:${env.IMAGE_TAG}", "--pull --no-cache .")
-            img.push() // :X.Y.Z
+            img.push() // push :X.Y.Z
+            // also push :latest when on main
             def branch = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
             if (branch == 'main') { img.push('latest') }
           }
@@ -71,73 +73,42 @@ pipeline {
       steps {
         sshagent([env.SSH_KEY_CRED]) {
 
-          // trust host
+          // trust host to avoid interactive prompt
           sh '''
             mkdir -p ~/.ssh && chmod 700 ~/.ssh
             ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
           '''
 
           // ensure remote app dir
+          sh 'ssh "$EC2_USER@$EC2_HOST" "mkdir -p ~/app"'
+
+          // copy compose, nginx, and the server script
           sh '''
-            ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "mkdir -p ~/app"
+            scp docker-compose.yaml "$EC2_USER@$EC2_HOST:~/app/"
+            scp nginx.conf        "$EC2_USER@$EC2_HOST:~/app/" || true
+            scp server-cmds.sh    "$EC2_USER@$EC2_HOST:~/app/"
           '''
 
-          // copy compose + nginx config
-          sh '''
-            scp -o StrictHostKeyChecking=no docker-compose.yaml "$EC2_USER@$EC2_HOST:~/app/"
-            scp -o StrictHostKeyChecking=no nginx.conf        "$EC2_USER@$EC2_HOST:~/app/"
-          '''
-
-          // write .env LOCALLY, then copy it (no heredoc expansion games)
+          // upload deploy env for compose to read
           sh '''
             printf "DOCKERHUB_REPO=%s\\nIMAGE_TAG=%s\\n" "$DOCKERHUB_REPO" "$IMAGE_TAG" > .deploy.env
-            scp -o StrictHostKeyChecking=no .deploy.env "$EC2_USER@$EC2_HOST:~/app/.env"
+            scp .deploy.env "$EC2_USER@$EC2_HOST:~/app/.env"
             rm -f .deploy.env
           '''
 
-          // login on EC2 if Docker Hub repo is private
+          // (optional) docker login on EC2 if repo is private
           script {
             if (env.DOCKERHUB_PRIVATE?.toLowerCase() == 'true') {
               withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
                 sh '''
-                  ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "echo \\"$DH_PASS\\" | docker login -u \\"$DH_USER\\" --password-stdin"
+                  ssh "$EC2_USER@$EC2_HOST" "echo \\"$DH_PASS\\" | docker login -u \\"$DH_USER\\" --password-stdin"
                 '''
               }
             }
           }
 
-          // run compose on the remote (quoted heredoc prevents local expansion)
-          sh '''
-            ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" 'bash -s' <<'EOF'
-set -e
-cd ~/app
-
-# Ensure Docker is running (harmless if already started)
-if ! sudo systemctl is-active --quiet docker; then
-  sudo systemctl enable --now docker || true
-  sudo usermod -aG docker ec2-user || true
-fi
-
-# Pick compose command on the remote
-if docker compose version >/dev/null 2>&1; then
-  COMPOSE="docker compose"
-elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE="$(command -v docker-compose)"
-else
-  echo "Docker Compose not found"; exit 1
-fi
-
-# Pull and start with the .env we uploaded
-$COMPOSE pull
-$COMPOSE up -d
-
-# optional: clean old images
-docker image prune -f || true
-
-# show status
-$COMPOSE ps
-EOF
-          '''
+          // make script executable & run it remotely
+          sh 'ssh "$EC2_USER@$EC2_HOST" "chmod +x ~/app/server-cmds.sh && bash ~/app/server-cmds.sh"'
         }
       }
     }
