@@ -33,23 +33,47 @@ pipeline {
       }
     }
 
+    // ⬇️ UPDATED STAGE
     stage('Set Version') {
       steps {
         script {
-          // Find last vX.Y.Z tag; default to 1.0.0 if none
+          // Make sure we see remote tags
+          sh 'git fetch --tags --quiet || true'
+
+          // Read latest vX.Y.Z (or default)
           def lastTag = sh(script: "git tag --list 'v*.*.*' --sort=-v:refname | head -n 1", returnStdout: true).trim()
           def current = lastTag ? lastTag.replaceFirst(/^v/, '') : '1.0.0'
           def parts = current.tokenize('.').collect { it as int }
           if (parts.size() != 3) { error "Bad version '${current}' (expected X.Y.Z)" }
           def (major, minor, patch) = parts
+
           switch (params.BUMP) {
             case 'major': major++; minor = 0; patch = 0; break
             case 'minor': minor++; patch = 0; break
             default     : patch++; break
           }
+
           env.IMAGE_TAG = "${major}.${minor}.${patch}"
           echo "New image tag: ${env.IMAGE_TAG}"
           writeFile file: 'VERSION', text: env.IMAGE_TAG + "\n"
+
+          // Push the tag back to GitHub when on main
+          def branch = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+          if (branch == 'main') {
+            // Get the origin URL we checked out from
+            def originUrl = sh(script: 'git config --get remote.origin.url', returnStdout: true).trim()
+            withCredentials([usernamePassword(credentialsId: 'github-credentials', usernameVariable: 'GH_USER', passwordVariable: 'GH_PASS')]) {
+              sh """
+                set -e
+                git config user.name "jenkins"
+                git config user.email "jenkins@local"
+                git tag -f "v$IMAGE_TAG"
+                git push "https://${GH_USER}:${GH_PASS}@${originUrl.replace('https://','')}" "v$IMAGE_TAG"
+              """
+            }
+          } else {
+            echo "Skipping tag push (branch: ${branch})"
+          }
         }
       }
     }
@@ -59,8 +83,7 @@ pipeline {
         script {
           docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDS) {
             def img = docker.build("${DOCKERHUB_REPO}:${env.IMAGE_TAG}", "--pull --no-cache .")
-            img.push() // push :X.Y.Z
-            // also push :latest when on main
+            img.push() // :X.Y.Z
             def branch = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
             if (branch == 'main') { img.push('latest') }
           }
