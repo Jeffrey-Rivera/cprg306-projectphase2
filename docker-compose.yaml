@@ -7,15 +7,14 @@ services:
       - NODE_ENV=production
       - HOSTNAME=0.0.0.0
       - PORT=3000
-      # add your own app envs here, e.g. NEXT_PUBLIC_API_URL=...
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:3000/"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000', r=>process.exit(0)).on('error',()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 10s
+      retries: 12
+      start_period: 60s   # give Next.js time to warm up
 
   nginx:
     image: nginx:latest
